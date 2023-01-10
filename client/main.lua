@@ -6,7 +6,6 @@ local ShopPed = {}
 -- Functions
 local function SetupItems(shop)
     TriggerServerEvent("gct-shops:server:getStock", shop)
-    print(json.encode(Config.Locations[shop]["products"]))
     local products = Config.Locations[shop]["products"]
     local playerJob = QBCore.Functions.GetPlayerData().job.name
     local items = {}
@@ -83,6 +82,17 @@ RegisterNetEvent("gct-shops:client:UpdateShop", function(shop, itemData, amount)
     TriggerServerEvent("gct-shops:server:UpdateShopItems", shop, itemData, amount)
 end)
 
+RegisterNetEvent("gct-shops:client:SetAllShopItems", function(result)
+    for k, v in pairs(result) do
+        if v.shop ~= nil then
+            Config.Locations[v.name]["label"] = v.label
+            Config.Locations[v.name]["products"] = json.decode(v.shop)
+        end
+    end
+    
+    Wait(1500)
+end)
+
 RegisterNetEvent("gct-shops:client:SetShopItems", function(shop, shopProducts, shopLabel)
     if shopProducts == nil then
         return
@@ -151,7 +161,8 @@ RegisterNetEvent("gct-shops:client:RestockShopItems", function(shop)
                     event = "gct-shops:client:addStockItem",
                     args = {
                         shop = shop,
-                        item = k
+                        item = k,
+                        amount = Config.Locations[shop]["products"][k].amount
                     }
                 }
             }
@@ -189,7 +200,7 @@ RegisterNetEvent("gct-shops:client:addStockItem", function(data)
         if not stock.amount then
             return
         end
-        TriggerServerEvent("gct-shops:server:RestockShopItems", stock.amount, data.item, shop)
+        TriggerServerEvent("gct-shops:server:RestockShopItems", stock.amount, data.item, shop, data.amount)
     end
 end)
 
@@ -374,6 +385,8 @@ RegisterNetEvent("gct-shops:client:depositMoney", function(data)
 end)
 
 local function openShop(shop, data)
+    TriggerServerEvent("gct-shops:server:getAllStocks")
+
     local products = data.products
     local ShopItems = {}
     ShopItems.items = {}
@@ -430,9 +443,10 @@ local function createPeds()
         while not HasModelLoaded(current) do
             Wait(0)
         end
-        
+
         if v.category ~= "business" then
-            ShopPed[k] = CreatePed(0, current, v["coords"].x, v["coords"].y, v["coords"].z - 1, v["coords"].w, false, false)
+            ShopPed[k] = CreatePed(0, current, v["coords"].x, v["coords"].y, v["coords"].z - 1, v["coords"].w, false,
+                false)
             TaskStartScenarioInPlace(ShopPed[k], v["scenario"], true)
             FreezeEntityPosition(ShopPed[k], true)
             SetEntityInvincible(ShopPed[k], true)
@@ -465,9 +479,17 @@ local function createPeds()
         end
     end
 
+    pedSpawned = true
+    
+    Wait(2500)
+    TriggerServerEvent("gct-shops:server:getAllStocks")
+end
+
+local function buyShop()
     if not ShopPed["buyshop"] then
         ShopPed["buyshop"] = {}
     end
+
     local current = Config.BuyShop.ped
     current = type(current) == 'string' and GetHashKey(current) or current
     RequestModel(current)
@@ -475,6 +497,7 @@ local function createPeds()
     while not HasModelLoaded(current) do
         Wait(0)
     end
+
     ShopPed["buyshop"] = CreatePed(0, current, Config.BuyShop.coords.x, Config.BuyShop.coords.y,
         Config.BuyShop.coords.z - 1, Config.BuyShop.coords.w, false, false)
     TaskStartScenarioInPlace(ShopPed["buyshop"], Config.BuyShop.scenario, true)
@@ -500,13 +523,10 @@ local function createPeds()
             distance = 2.0
         })
     end
-
-    pedSpawned = true
 end
 
 function shopInfo()
     QBCore.Functions.TriggerCallback("gct-shops:server:getShopInfo", function(callbak)
-        print(callbak.result)
         if callbak.result == "SUCCESS" then
             local buyMenu = {{
                 header = "Market Sözleşmesi",
@@ -529,68 +549,78 @@ function shopInfo()
 end
 
 function openBossMenu(shop)
-    local Player = QBCore.Functions.GetPlayerData()
-    if Player.job.grade.level >= 1 then
-        local buyMenu = {{
-            header = "Market Yönetimi",
-            isMenuHeader = true
-        }, {
-            header = "Stokları Yenile",
-            txt = "Tükenmiş Malzemeleri Yenileyin",
-            params = {
-                event = "gct-shops:client:RestockShopItems",
-                args = shop
-            }
-        }, {
-            header = "Çalışan Yönetimi",
-            txt = "Çalışanlarınızı Yönetin",
-            params = {
-                event = "gct-shops:client:employeeManagement",
-                args = shop
-            }
-        }, {
-            header = "Market Hesabından Para Çek",
-            txt = "Market Hesabından Para Çekin",
-            params = {
-                event = "gct-shops:client:withdrawMoney",
-                args = {
-                    shop = shop
+    TriggerServerEvent("gct-shops:server:getAllStocks")
+    QBCore.Functions.TriggerCallback("gct-shops:server:getShopMoney", function(money)
+        local Player = QBCore.Functions.GetPlayerData()
+        if Player.job.grade.level >= 1 then
+
+            local buyMenu = {{
+                header = "Market Yönetimi",
+                txt = "Market Hesabı: $".. money,
+                isMenuHeader = true
+            }, {
+                header = "Stokları Yenile",
+                txt = "Tükenmiş Malzemeleri Yenileyin",
+                params = {
+                    event = "gct-shops:client:RestockShopItems",
+                    args = shop
                 }
-            }
-        }, {
-            header = "Market Hesabına Para Yatır",
-            txt = "Market Hesabına Para Yatırın",
-            params = {
-                event = "gct-shops:client:depositMoney",
-                args = {
-                    shop = shop
+            }, {
+                header = "Çalışan Yönetimi",
+                txt = "Çalışanlarınızı Yönetin",
+                params = {
+                    event = "gct-shops:client:employeeManagement",
+                    args = shop
                 }
-            }
-        }}
+            }, {
+                header = "Market Hesabından Para Çek",
+                txt = "Market Hesabından Para Çekin",
+                params = {
+                    event = "gct-shops:client:withdrawMoney",
+                    args = {
+                        shop = shop
+                    }
+                }
+            }, {
+                header = "Market Hesabına Para Yatır",
+                txt = "Market Hesabına Para Yatırın",
+                params = {
+                    event = "gct-shops:client:depositMoney",
+                    args = {
+                        shop = shop
+                    }
+                }
+            }, {
+                header = "Kapat",
+                icon = "fa-solid fa-angle-left",
+                params = {
+                    event = "qb-menu:closeMenu"
+                }
+            }}
 
-        exports['qb-menu']:openMenu(buyMenu)
+            exports['qb-menu']:openMenu(buyMenu)
 
-    else
-        local buyMenu = {{
-            header = "Market Yönetimi",
-            isMenuHeader = true
-        }, {
-            header = "Stokları Yenile",
-            txt = "Tükenmiş Malzemeleri Yenileyin",
-            params = {
-                event = "gct-shops:client:RestockShopItems",
-                args = shop
-            }
-        }}
-        exports['qb-menu']:openMenu(buyMenu)
-    end
-
+        else
+            local buyMenu = {{
+                header = "Market Yönetimi",
+                isMenuHeader = true
+            }, {
+                header = "Stokları Yenile",
+                txt = "Tükenmiş Malzemeleri Yenileyin",
+                params = {
+                    event = "gct-shops:client:RestockShopItems",
+                    args = shop
+                }
+            }}
+            exports['qb-menu']:openMenu(buyMenu)
+        end
+    end)
 end
 
 function setCategory()
     QBCore.Functions.TriggerCallback("gct-shops:server:haveShop", function(haveShop)
         if haveShop == false then
-            
+
             local catMenu = {{
                 header = "Market Satın Al",
                 isMenuHeader = true
@@ -611,7 +641,7 @@ function setCategory()
                 header = "Kapat",
                 icon = "fa-solid fa-angle-left",
                 params = {
-                    event = "qb-menu:closeMenu",
+                    event = "qb-menu:closeMenu"
                 }
             }
 
@@ -648,7 +678,7 @@ function getShops(category)
         header = "Geri",
         icon = "fa-solid fa-angle-left",
         params = {
-            event = "gct-shops:client:openCatMenu",
+            event = "gct-shops:client:openCatMenu"
         }
     }
 
@@ -715,7 +745,9 @@ end)
 
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
     -- createBlips()
+    buyShop()
     createPeds()
+
 end)
 
 RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
@@ -725,9 +757,8 @@ end)
 AddEventHandler('onResourceStart', function(resourceName)
     if GetCurrentResourceName() == resourceName then
         -- createBlips()
+        buyShop()
         createPeds()
-        TriggerServerEvent("gct-shops:server:getAllStocks")
-
     end
 end)
 

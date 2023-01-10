@@ -4,6 +4,7 @@ MySQL.query('SELECT * FROM player_shops', {}, function(result)
     if result then
         for k, v in pairs(result) do
             Config.Locations[v.name]["owner"] = v.citizenid
+
         end
     end
 end)
@@ -24,6 +25,22 @@ QBCore.Functions.CreateCallback('gct-shops:server:haveShop', function(source, cb
     end
 
     cb(false)
+end)
+
+QBCore.Functions.CreateCallback('gct-shops:server:getShopMoney', function(source, cb)
+    local Player = QBCore.Functions.GetPlayer(source)
+
+    if Player then
+        MySQL.query("SELECT * FROM player_shops WHERE `citizenid` = @id", {
+            ["@id"] = Player.PlayerData.citizenid
+        }, function(result)
+            if result[1] then
+                cb(result[1].money)
+            else
+                cb(0)
+            end
+        end)    
+    end
 end)
 
 QBCore.Functions.CreateCallback('gct-shops:server:getShopInfo', function(source, cb)
@@ -107,7 +124,7 @@ RegisterNetEvent('gct-shops:server:revokeShop', function(src)
     
 end)
 
-RegisterNetEvent('gct-shops:server:RestockShopItems', function(amount, item, shop)
+RegisterNetEvent('gct-shops:server:RestockShopItems', function(amount, item, shop, oldAmount)
     if amount ~= nil then
 
         if QBCore.Functions.GetPlayer(source).PlayerData.money.bank < (amount * Config.Locations[shop]["products"][item].stockMoney) then
@@ -116,40 +133,35 @@ RegisterNetEvent('gct-shops:server:RestockShopItems', function(amount, item, sho
         end
 
         QBCore.Functions.GetPlayer(source).Functions.RemoveMoney("bank", (amount * Config.Locations[shop]["products"][item].stockMoney))
-        Config.Locations[shop]["products"][item].amount = Config.Locations[shop]["products"][item].amount + amount
+        Config.Locations[shop]["products"][item].amount = oldAmount + amount
 
         MySQL.Async.execute("UPDATE player_shops SET `shop` = @shop WHERE `name`= @name", {
             ["@name"] = shop,
             ["@shop"] = json.encode(Config.Locations[shop]["products"])
         })
         
-        TriggerClientEvent("gct-shops:client:SetShopItems", source, shop, Config.Locations[shop]["products"])
+        TriggerClientEvent("gct-shops:client:SetShopItems", source, shop, Config.Locations[shop]["products"], Config.Locations[shop]["label"])
         TriggerClientEvent('QBCore:Notify', source, "Stok Yenilendi!")
-        TriggerClientEvent('gct-shops:client:openBossMenu', source)
     end
 end)
 
 RegisterNetEvent('gct-shops:server:getAllStocks', function(source)
     MySQL.query('SELECT * FROM player_shops', {}, function(result)
-        for i, v in ipairs(result) do
-            if v.shop ~= nil then
-                TriggerClientEvent('gct-shops:client:SetShopItems', -1, v.name, json.decode(v.shop), v.label)
-            end
-        end
+        TriggerClientEvent('gct-shops:client:SetAllShopItems', -1, result)
     end)
-
-    
 end)
 
 RegisterNetEvent('gct-shops:server:getStock', function(source, shop)
-    local result = MySQL.query("SELECT `shop` FROM player_shops WHERE `name` = @name", {
+    MySQL.query("SELECT * FROM player_shops WHERE `name` = @name", {
         ["@name"] = shop
-    })
-
-    local shopItems = {}
+    }, function(result)
+        if result[1] then
+            local shopItems = json.decode(result[1].shop)
     
 
-    TriggerClientEvent('gct-shops:client:SetShopItems', -1, shop, shopItems)
+            TriggerClientEvent('gct-shops:client:SetShopItems', -1, shop, shopItems, result[1].label)
+        end
+    end)
 end)
 
 QBCore.Functions.CreateCallback('gct-shops:server:getEmployees', function(source, cb, shop)
@@ -175,8 +187,6 @@ end)
 QBCore.Functions.CreateCallback('gct-shops:server:buyShop', function(source, cb, shop, shopName)
     local src = source
     local Player = QBCore.Functions.GetPlayer(src)
-
-    print(shopName)
 
     if Config.Locations[shop] ~= nil then
         local hasShop = MySQL.Sync.fetchScalar("SELECT name FROM player_shops WHERE `citizenid` = @id", {["@id"] = Player.PlayerData.citizenid})
@@ -324,7 +334,7 @@ function RentCheck()
             end
         end
     end
-    SetTimeout(2 * (60 * 100), RentCheck)
+    SetTimeout(2 * (60 * 1000), RentCheck)
 end
 
 RentCheck()
